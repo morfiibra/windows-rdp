@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Download ngrok
+        shell: powershell
+        run: |
+          Invoke-WebRequest `
+            https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip `
+            -OutFile ngrok.zip
+
+          Expand-Archive ngrok.zip -DestinationPath ngrok
+
+      - name: Authenticate ngrok
+        shell: powershell
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          .\ngrok\ngrok.exe config add-authtoken $Env:NGROK_AUTH_TOKEN
+
+      - name: Enable RDP
+        shell: powershell
+        run: |
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name 'fDenyTSConnections' `
+            -Value 0
+
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name 'UserAuthentication' `
+            -Value 1
+
+      - name: Set RDP password
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          $SecurePassword = ConvertTo-SecureString `
+            $Env:RDP_PASSWORD `
+            -AsPlainText `
+            -Force
+
+          Set-LocalUser `
+            -Name "runneradmin" `
+            -Password $SecurePassword
+
+      - name: Start ngrok tunnel
+        shell: powershell
+        run: |
+          Start-Process `
+            ".\ngrok\ngrok.exe" `
+            -ArgumentList "tcp 3389" `
+            -NoNewWindow
+
+          Start-Sleep -Seconds 8
+
+          $tunnels = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:4040/api/tunnels"
+
+          $url = $tunnels.tunnels[0].public_url
+
+          Write-Host ""
+          Write-Host "RDP ADDRESS: $url"
+          Write-Host "USERNAME: runneradmin"
+          Write-Host ""
+
+          while ($true) {
+            Start-Sleep -Seconds 300
+          }
